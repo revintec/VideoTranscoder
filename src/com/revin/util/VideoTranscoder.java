@@ -334,7 +334,7 @@ public class VideoTranscoder{
       return false;
     }else if(Math.abs(nvi.duration-vi.duration)>3){
       System.err.println("\rDurationMismatch: "+formatTimeX(vi.duration)+" -> "+formatTimeX(nvi.duration));
-      String err=ERR_TranscodingError;
+      String err=ERR_DurationMismatch;
       if(markFileWithError(vi,err))
         deleteFile(tmp);
       else System.err.println("Unable to mark error: "+err);
