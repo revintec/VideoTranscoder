@@ -389,8 +389,24 @@ public class VideoTranscoder{
       String path=""+p;
       // .DO_NOT_TRSC. can also be in the path(not just the filename)
       // and it's case sensitive
-      if(path.contains(PRAGMA_DNTRSC)){
-        String out=String.format("Skipping(%s):","PRAGMA_IGN");
+      int ipx=path.lastIndexOf(PRAGMA_DNTRSC);
+      if(ipx>0){// shouldn't be 0
+        String postfix=path.substring(ipx+PRAGMA_DNTRSC.length());
+        int i=postfix.indexOf('.');
+        String err;
+        if(i>0){// shouldn't be 0
+          err=postfix.substring(0,i);
+          switch(err){
+            case ERR_TranscodingError:
+              err="ERR_TRSC";break;
+            case ERR_DurationMismatch:
+              err="ERR_DURA";break;
+            case ERR_TFileGrowTooMuch:
+              err="ERR_TFGR";break;
+            default:err=null;
+          }
+        }else err=null;
+        String out=String.format("Skipping(%s):",err!=null?err:"PRAGMA_IGN");
         out=String.format("%-32s %s",out,path);
         System.out.println(out);
         return FileVisitResult.CONTINUE;
