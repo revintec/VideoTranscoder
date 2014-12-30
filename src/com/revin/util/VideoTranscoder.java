@@ -16,7 +16,12 @@ import java.util.regex.Pattern;
  * Created by revin on Nov.25,2014.
  */
 public class VideoTranscoder{
+  public static final String PRAGMA_DNTRSC=".DO_NOT_TRSC.";
+  public static final String ERR_TranscodingError="E04"; // some error happens during transcoding, retry is a waste of time
+  public static final String ERR_DurationMismatch="E05"; // bad frames in file, cause ffmpeg stop encoding in the middle but still exit code 0
+  public static final String ERR_TFileGrowTooMuch="E06"; // after transcoding, file size grow too much
   public static final String tmpFileAppendix=".transcoding";
+
   public static class DiscardStream extends Thread{
     protected final InputStream ins;
     public DiscardStream(InputStream ins){this.ins=ins;}
@@ -34,6 +39,10 @@ public class VideoTranscoder{
     public final String filepath;
     // used to determine is transcode necessary
     public final boolean format;
+    // see ffmpeg doc, https://www.ffmpeg.org/ffmpeg-all.html#toc-Stream-selection
+    // By default, ffmpeg includes only one stream of each type (video, audio, subtitle)
+    // present in the input files and adds them to each output file.
+    public final boolean otherAVStreams;
     public final boolean otherStreams;
     // video profile, audio profile
     public final boolean vpro,apro;
@@ -41,9 +50,10 @@ public class VideoTranscoder{
     public final int fps;          // used to display transcode speed
     public final int width,height; // used to calculate scale ONLY
     public final long filesize;    // used to print how many disk-space was saved
-    public VideoInfo(String filepath,boolean format,boolean otherStreams,boolean vpro,boolean apro,int duration,int fps,int width,int height,long filesize){
+    public VideoInfo(String filepath,boolean format,boolean otherAVStreams,boolean otherStreams,boolean vpro,boolean apro,int duration,int fps,int width,int height,long filesize){
       this.filepath=filepath;
       this.format=format;
+      this.otherAVStreams=otherAVStreams;
       this.otherStreams=otherStreams;
       this.vpro=vpro;
       this.apro=apro;
@@ -53,14 +63,20 @@ public class VideoTranscoder{
       this.height=height;
       this.filesize=filesize;
     }
-    @Override public String toString(){return String.format("%s%n%ss(%dx%d) %s",filepath,duration,width,height,formatSize(filesize));}
+    @Override public String toString(){return String.format("%s%n%ss(%dx%d) %s",filepath,duration,width,height,formatSizeX(filesize));}
   }
-  public static String formatSize(long size){
+  private static String fixedpoint(double x){
+    int i=(int)x;
+    int f=(int)(x*100)%100;
+    if(f<10)return i+".0"+f;
+    return i+"."+f;
+  }
+  public static String formatSizeX(long size){
     if(size<0)throw new IllegalArgumentException("size can't be negative");
     else if(size<1e3)return (int)(size/1e0)+" B";
-    else if(size<1e6)return (int)(size/1e3)+" K";
-    else if(size<1e9)return (int)(size/1e6)+" M";
-    else return (int)(size/1e9)+" G";
+    else if(size<1e6)return fixedpoint(size/1e3)+" K";
+    else if(size<1e9)return fixedpoint(size/1e6)+" M";
+    else return fixedpoint(size/1e9)+" G";
   }
   /** @param time in seconds */
   public static String formatTimeX(int time){
@@ -132,7 +148,7 @@ public class VideoTranscoder{
       int duration=(int)Double.parseDouble(getProperty(output,"format.duration"));
       //noinspection ConstantConditions
       int streams=Integer.parseInt(getProperty(output,"format.nb_streams"));
-      boolean otherStreams=false;
+      boolean otherAVStreams=false,otherStreams=false;
       int vpro=0,apro=0;
       int width=0,height=0,fps=0;
       for(int i=0;i<streams;++i){
@@ -140,18 +156,30 @@ public class VideoTranscoder{
         if(data==null)return null;
         switch(data){
           case "audio":
-            if(apro>=0){
+            if(apro==0){
               if("aac".equals(getProperty(output,i,"codec_name")))
                 apro=1;
               else apro=-1;
 //              if(!"aac_he_v2".equals(getProperty(output,i,"profile")))profile=false;
+            }else{
+              // see ffmpeg doc, https://www.ffmpeg.org/ffmpeg-all.html#toc-Stream-selection
+              // By default, ffmpeg includes only one stream of each type (video, audio, subtitle)
+              // present in the input files and adds them to each output file.
+              otherAVStreams=true;
+              apro=-1;
             }break;
           case "video":
-            if(vpro>=0){
+            if(vpro==0){
               if("h264".equals(getProperty(output,i,"codec_name")))
                 vpro=1;
               else vpro=-1;
 //            if(!"Main".equals(getProperty(output,i,"profile")))profile=false;
+            }else{
+              // see ffmpeg doc, https://www.ffmpeg.org/ffmpeg-all.html#toc-Stream-selection
+              // By default, ffmpeg includes only one stream of each type (video, audio, subtitle)
+              // present in the input files and adds them to each output file.
+              otherAVStreams=true;
+              vpro=-1;
             }
             //noinspection ConstantConditions
             Matcher m=ptFps.matcher(getProperty(output,i,"avg_frame_rate"));
@@ -176,7 +204,7 @@ public class VideoTranscoder{
           default:otherStreams=true;
         }
       }if(vpro==0||apro==0)return null;
-      return new VideoInfo(path,format,otherStreams,vpro>0,apro>0,duration,fps,width,height,filesize);
+      return new VideoInfo(path,format,otherAVStreams,otherStreams,vpro>0,apro>0,duration,fps,width,height,filesize);
     }catch(Exception e){
       e.printStackTrace();
       return null;
@@ -188,7 +216,7 @@ public class VideoTranscoder{
   /** @return null means should encode */
   public static String shouldEncode(VideoInfo vi){
     if(vi==null)return "INCOMPLETE_VIDEOINFO";
-    if(vi.otherStreams)return "OTHER_STREAMS_PRESENT";
+    if(vi.otherAVStreams||vi.otherStreams)return "OTHER_STREAMS_PRESENT";
     // vi.width, vi.height already processed
     // in getInfo(...), if(pixels>800*800)vpro=-1;
     if(vi.format&&vi.vpro&&vi.apro)
@@ -207,11 +235,12 @@ public class VideoTranscoder{
     else return "";
   }
   /** timestamp in seconds */
-  private static long timeStamp(){return System.nanoTime()/1000000000;}
+  public static long timeStamp(){return System.nanoTime()/1000000000;}
+  public static String formatProfile(VideoInfo vi){return String.format("F%d X%d V%d A%d O%d",vi.format?1:0,vi.otherAVStreams?1:0,vi.vpro?1:0,vi.apro?1:0,vi.otherStreams?1:0);}
   @Nullable
   public static String transcodeWithSoutPrints(VideoInfo vi){
     String tmp=vi.filepath+tmpFileAppendix;
-    Process process=null;boolean clean=false;
+    Process process=null;
     try{
       ffmpeg[ffmpegVcodec]=vi.vpro?"copy":"libx264";
       ffmpeg[ffmpegAcodec]=vi.apro?"copy":"libfdk_aac";
@@ -225,8 +254,7 @@ public class VideoTranscoder{
       BufferedReader br=new BufferedReader(new InputStreamReader(process.getErrorStream()));
       String line,clear="\r                                                                \r";
       String wholeBuffer="";
-      String diff=String.format("F%d V%d A%d O%d",vi.format?1:0,vi.vpro?1:0,vi.apro?1:0,vi.otherStreams?1:0);
-      System.out.println(diff+"    "+vi.filepath);
+      System.out.println(formatProfile(vi)+"    "+vi.filepath);
       long startTime=timeStamp();
       while((line=br.readLine())!=null){
         Matcher mt=ptStat.matcher(line);
@@ -242,16 +270,18 @@ public class VideoTranscoder{
         String out=String.format("\r%s\r%2d%%, FPS=%d%s, time=%s, ETA=%s",clear,(int)percent,fps,speedFactor(vi,fps),time,formatTimeX(eta));
         System.out.print(out);
       }process.waitFor(3000,TimeUnit.MILLISECONDS);
-      System.out.print(clear);clean=true;
       int exitCode;
       if((exitCode=process.exitValue())!=0){
         System.err.println(wholeBuffer);
         throw new UnexpectedException("exit code: "+exitCode);
       }return tmp;
     }catch(Exception e){
-      if(!clean)System.err.println();
+      System.err.print("\r");
       e.printStackTrace();
-      deleteFile(tmp);
+      String err=ERR_TranscodingError;
+      if(markFileWithError(vi,err))
+        deleteFile(tmp);
+      else System.err.println("Unable to mark error: "+err);
       return null;
     }finally{
       if(process!=null)
@@ -267,8 +297,10 @@ public class VideoTranscoder{
     catch(IOException e){return false;}
   }
   private static boolean deleteFile(String file){return deleteFile(Paths.get(file));}
-  private static boolean deleteFile(Path file){try{Files.delete(file);return true;}catch(IOException e){e.printStackTrace();return false;}}
-  private static String getFilePathPre(String path){
+  private static boolean deleteFile(Path file){
+    try{
+      Files.delete(file);return true;}catch(IOException e){e.printStackTrace();return false;}}
+  public static String getFilePathPre(String path){
     Path p=Paths.get(path);
     String filename=p.getFileName().toString();
     int i=filename.lastIndexOf('.');
@@ -276,16 +308,46 @@ public class VideoTranscoder{
       return path;
     return p.resolveSibling(filename.substring(0,i)).toString();
   }
+  public static String markFileWithError(String path,String error){
+    // shouldn't operate on the PRAGMA_DNTRSC files,
+    // they are protected against any operations
+    if(path.contains(PRAGMA_DNTRSC))return null;
+    Path p=Paths.get(path);
+    String filename=p.getFileName().toString();
+    int i=filename.lastIndexOf('.');
+    if(i<=0||filename.length()-i>5) // .rmvb
+      return path+PRAGMA_DNTRSC+error;
+    return ""+p.resolveSibling(filename.substring(0,i)+PRAGMA_DNTRSC+error+filename.substring(i));
+  }
+  public static boolean markFileWithError(VideoInfo vi,String error){
+    String newPath=markFileWithError(vi.filepath,error);
+    return newPath!=null&&tryMoveFile(vi.filepath,newPath);
+  }
   public static boolean finishWithFileAndDbOps(VideoInfo vi,String tmp){
     VideoInfo nvi=getInfo(tmp);
     if(nvi==null||!(nvi.format&&nvi.vpro&&nvi.apro)){
-      deleteFile(tmp);
+      System.err.println("\rTrscProfileMismatch: "+formatProfile(nvi));
+      String err=ERR_TranscodingError;
+      if(markFileWithError(vi,err))
+        deleteFile(tmp);
+      else System.err.println("Unable to mark error: "+err);
       return false;
-    }else if(Math.abs(vi.duration-nvi.duration)>3){
+    }else if(Math.abs(nvi.duration-vi.duration)>3){
       System.err.println("\rDurationMismatch: "+formatTimeX(vi.duration)+" -> "+formatTimeX(nvi.duration));
-      deleteFile(tmp);
+      String err=ERR_TranscodingError;
+      if(markFileWithError(vi,err))
+        deleteFile(tmp);
+      else System.err.println("Unable to mark error: "+err);
       return false;
-    }String newFilePathPre=getFilePathPre(vi.filepath);
+    }else if(nvi.filesize-vi.filesize>1048576){
+      System.err.println("\rFileSizeGrow: "+formatSizeX(vi.filesize)+" -> "+formatSizeX(nvi.filesize));
+      String err=ERR_TFileGrowTooMuch;
+      if(markFileWithError(vi,err))
+        deleteFile(tmp);
+      else System.err.println("Unable to mark error: "+err);
+      return false;
+    }
+    String newFilePathPre=getFilePathPre(vi.filepath);
     if(!(newFilePathPre+transcodedPostfix).equalsIgnoreCase(vi.filepath)){
       if(!tryMoveFile(nvi.filepath,newFilePathPre+transcodedPostfix)){
         int i=1;
@@ -294,7 +356,7 @@ public class VideoTranscoder{
         newFilePathPre+="("+i+")";
       }deleteFile(vi.filepath);
     }else replaceFile(nvi.filepath,vi.filepath);
-    String output=String.format("%s -> %s %s",formatSize(vi.filesize),formatSize(nvi.filesize),newFilePathPre+transcodedPostfix);
+    String output=String.format("%s -> %s %s",formatSizeX(vi.filesize),formatSizeX(nvi.filesize),newFilePathPre+transcodedPostfix);
     System.out.println(output);
     return true;
   }
@@ -306,6 +368,7 @@ public class VideoTranscoder{
     Path path=Paths.get(args[0]);
     Files.walkFileTree(path,new FVCleanup());
     Files.walkFileTree(path,new FVDoConv());
+    System.out.println("Completed.");
   }
   public static class FVCleanup implements FileVisitor<Path>{
     @Override public FileVisitResult preVisitDirectory(Path p,BasicFileAttributes a){return FileVisitResult.CONTINUE;}
@@ -326,7 +389,7 @@ public class VideoTranscoder{
       String path=""+p;
       // .DO_NOT_TRSC. can also be in the path(not just the filename)
       // and it's case sensitive
-      if(path.contains(".DO_NOT_TRSC.")){
+      if(path.contains(PRAGMA_DNTRSC)){
         String out=String.format("Skipping(%s):","PRAGMA_IGN");
         out=String.format("%-32s %s",out,path);
         System.out.println(out);

@@ -5,6 +5,6 @@ package com.revin.util;
  */
 public class Test{
     public static void main(String[] args){
-        System.out.println("mov,mp4,ccd".matches("\\bmp4\\b"));
+        System.out.println(1.123456*100%100);
     }
 }
