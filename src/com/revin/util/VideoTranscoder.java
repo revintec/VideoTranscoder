@@ -377,6 +377,9 @@ public class VideoTranscoder{
     if(args.length!=1){
       System.err.println("usage: videoTranscoder path/to/video/root/folder");
       return;
+    }else if(!"utf-8".equalsIgnoreCase(System.getProperty("file.encoding"))){
+      System.err.println("use -Dfile.encoding=utf-8 to set encoding");
+      return;
     }
     Path path=Paths.get(args[0]);
     Files.walkFileTree(path,new FVCleanup());
