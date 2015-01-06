@@ -7,6 +7,7 @@ import java.nio.BufferOverflowException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.rmi.UnexpectedException;
+import java.util.Date;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -16,6 +17,30 @@ import java.util.regex.Pattern;
  * Created by revin on Nov.25,2014.
  */
 public class VideoTranscoder{
+  public static final OutputStream fileout;
+  static{
+    OutputStream ost;
+    try{
+      ost=new FileOutputStream("transcoding.log",true);
+    }catch(IOException e){
+      ost=null;
+      e.printStackTrace();
+      System.exit(4);
+    }fileout=ost;
+  }
+  public static boolean writeLog(String message){
+    if(fileout==null)return false;
+    if(message.contains("\r"))return false;
+    if(!message.endsWith("\n"))message+="\n";
+    message=message.replaceAll("(?<!\r)\n","\r\n");
+    try{
+      fileout.write(message.getBytes());
+      return true;
+    }catch(IOException e){
+      e.printStackTrace();
+      return false;
+    }
+  }
   public static final String PRAGMA_DNTRSC=".DO_NOT_TRSC.";
   public static final String ERR_TranscodingError="E04"; // some error happens during transcoding, retry is a waste of time
   public static final String ERR_DurationMismatch="E05"; // bad frames in file, cause ffmpeg stop encoding in the middle but still exit code 0
@@ -277,12 +302,11 @@ public class VideoTranscoder{
         throw new UnexpectedException("exit code: "+exitCode);
       }return tmp;
     }catch(Exception e){
+      writeLog("TranscodingError: "+vi.filepath+", "+e.getMessage());
       System.err.print("\r");
       e.printStackTrace();
       String err=ERR_TranscodingError;
-      if(markFileWithError(vi,err))
-        deleteFile(tmp);
-      else System.err.println("Unable to mark error: "+err);
+      markFileWithErrorAndDeleteTmpWithLogRewind(vi,err,tmp);
       return null;
     }finally{
       if(process!=null)
@@ -309,6 +333,7 @@ public class VideoTranscoder{
       return path;
     return p.resolveSibling(filename.substring(0,i)).toString();
   }
+  /** no fs operation performed */
   public static String markFileWithError(String path,String error){
     // shouldn't operate on the PRAGMA_DNTRSC files,
     // they are protected against any operations
@@ -320,6 +345,14 @@ public class VideoTranscoder{
       return path+PRAGMA_DNTRSC+error;
     return ""+p.resolveSibling(filename.substring(0,i)+PRAGMA_DNTRSC+error+filename.substring(i));
   }
+  public static boolean markFileWithErrorAndDeleteTmpWithLogRewind(VideoInfo vi,String error,String tmp){
+    if(!markFileWithError(vi,error)){
+      writeLog("UnableToMarkError: "+vi.filepath+", error "+error);
+      System.err.println("\rUnable to mark error: "+error);
+      return false;
+    }else deleteFile(tmp);
+    return true;
+  }
   public static boolean markFileWithError(VideoInfo vi,String error){
     String newPath=markFileWithError(vi.filepath,error);
     return newPath!=null&&tryMoveFile(vi.filepath,newPath);
@@ -327,25 +360,24 @@ public class VideoTranscoder{
   public static boolean finishWithFileAndDbOps(VideoInfo vi,String tmp){
     VideoInfo nvi=getInfo(tmp);
     if(nvi==null||!(nvi.format&&nvi.vpro&&nvi.apro)){
+      writeLog("TrscProfileMismatch: "+vi.filepath+", "+formatProfile(vi)+" -> "+formatProfile(nvi)+
+              ", size "+formatSizeX(vi.filesize)+" -> "+formatSizeX(nvi.filesize));
       System.err.println("\rTrscProfileMismatch: "+formatProfile(nvi));
       String err=ERR_TranscodingError;
-      if(markFileWithError(vi,err))
-        deleteFile(tmp);
-      else System.err.println("Unable to mark error: "+err);
+      markFileWithErrorAndDeleteTmpWithLogRewind(vi,err,tmp);
       return false;
     }else if(Math.abs(nvi.duration-vi.duration)>3){
+      writeLog("DurationMismatch: "+vi.filepath+", "+formatTimeX(vi.duration)+" -> "+formatTimeX(nvi.duration)+
+              ", size "+formatSizeX(vi.filesize)+" -> "+formatSizeX(nvi.filesize));
       System.err.println("\rDurationMismatch: "+formatTimeX(vi.duration)+" -> "+formatTimeX(nvi.duration));
       String err=ERR_DurationMismatch;
-      if(markFileWithError(vi,err))
-        deleteFile(tmp);
-      else System.err.println("Unable to mark error: "+err);
+      markFileWithErrorAndDeleteTmpWithLogRewind(vi,err,tmp);
       return false;
     }else if(nvi.filesize-vi.filesize>1048576){
+      writeLog("FileSizeGrow: "+vi.filepath+", "+formatSizeX(vi.filesize)+" -> "+formatSizeX(nvi.filesize));
       System.err.println("\rFileSizeGrow: "+formatSizeX(vi.filesize)+" -> "+formatSizeX(nvi.filesize));
       String err=ERR_TFileGrowTooMuch;
-      if(markFileWithError(vi,err))
-        deleteFile(tmp);
-      else System.err.println("Unable to mark error: "+err);
+      markFileWithErrorAndDeleteTmpWithLogRewind(vi,err,tmp);
       return false;
     }
     String newFilePathPre=getFilePathPre(vi.filepath);
@@ -357,7 +389,8 @@ public class VideoTranscoder{
         newFilePathPre+="("+i+")";
       }deleteFile(vi.filepath);
     }else replaceFile(nvi.filepath,vi.filepath);
-    String output=String.format("%s -> %s %s",formatSizeX(vi.filesize),formatSizeX(nvi.filesize),newFilePathPre+transcodedPostfix);
+    String output=String.format("\r%s -> %s %s",formatSizeX(vi.filesize),formatSizeX(nvi.filesize),newFilePathPre+transcodedPostfix);
+    writeLog("OK: "+vi.filepath+", "+formatSizeX(vi.filesize)+" -> "+formatSizeX(nvi.filesize));
     System.out.println(output);
     return true;
   }
@@ -369,17 +402,23 @@ public class VideoTranscoder{
       System.err.println("use -Dfile.encoding=utf-8 to set encoding");
       return;
     }
+    writeLog("\n================================");
+    writeLog(new Date()+", args: "+args[0]);
     Path path=Paths.get(args[0]);
     Files.walkFileTree(path,new FVCleanup());
     Files.walkFileTree(path,new FVDoConv());
-    System.out.println("Completed.");
+    String msg="Completed.";
+    writeLog(msg);
+    System.out.println(msg);
   }
   public static class FVCleanup implements FileVisitor<Path>{
     @Override public FileVisitResult preVisitDirectory(Path p,BasicFileAttributes a){return FileVisitResult.CONTINUE;}
     @Override public FileVisitResult visitFile(Path p,BasicFileAttributes a){
       String path=""+p;
       if(path.endsWith(tmpFileAppendix)){
-        System.out.println("Deleting: "+path);
+        String msg="Deleting: "+path;
+        writeLog(msg);
+        System.out.println(msg);
         deleteFile(p);
       }return FileVisitResult.CONTINUE;
     }
