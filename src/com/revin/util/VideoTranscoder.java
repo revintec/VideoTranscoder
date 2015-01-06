@@ -302,7 +302,7 @@ public class VideoTranscoder{
         throw new UnexpectedException("exit code: "+exitCode);
       }return tmp;
     }catch(Exception e){
-      writeLog("TranscodingError: "+vi.filepath+", "+e.getMessage());
+      writeLog("TranscodingError: "+e.getMessage()+"  "+vi.filepath);
       System.err.print("\r");
       e.printStackTrace();
       String err=ERR_TranscodingError;
@@ -347,7 +347,7 @@ public class VideoTranscoder{
   }
   public static boolean markFileWithErrorAndDeleteTmpWithLogRewind(VideoInfo vi,String error,String tmp){
     if(!markFileWithError(vi,error)){
-      writeLog("UnableToMarkError: "+vi.filepath+", error "+error);
+      writeLog("UnableToMarkError: "+error+"  "+vi.filepath);
       System.err.println("\rUnable to mark error: "+error);
       return false;
     }else deleteFile(tmp);
@@ -360,22 +360,23 @@ public class VideoTranscoder{
   public static boolean finishWithFileAndDbOps(VideoInfo vi,String tmp){
     VideoInfo nvi=getInfo(tmp);
     if(nvi==null||!(nvi.format&&nvi.vpro&&nvi.apro)){
-      writeLog("TrscProfileMismatch: "+vi.filepath+", "+formatProfile(vi)+" -> "+formatProfile(nvi)+
-              ", size "+formatSizeX(vi.filesize)+" -> "+formatSizeX(nvi.filesize));
+      writeLog("TrscProfileMismatch: "+formatProfile(vi)+" -> "+formatProfile(nvi)+
+              ", size "+formatSizeX(vi.filesize)+" -> "+formatSizeX(nvi==null?-1:nvi.filesize)+
+              "  "+vi.filepath);
       System.err.println("\rTrscProfileMismatch: "+formatProfile(nvi));
       String err=ERR_TranscodingError;
       markFileWithErrorAndDeleteTmpWithLogRewind(vi,err,tmp);
       return false;
     }else if(Math.abs(nvi.duration-vi.duration)>3){
-      writeLog("DurationMismatch: "+vi.filepath+", "+formatTimeX(vi.duration)+" -> "+formatTimeX(nvi.duration)+
-              ", size "+formatSizeX(vi.filesize)+" -> "+formatSizeX(nvi.filesize));
+      writeLog("DurationMismatch: "+formatTimeX(vi.duration)+" -> "+formatTimeX(nvi.duration)+
+              ", size "+formatSizeX(vi.filesize)+" -> "+formatSizeX(nvi.filesize)+"  "+vi.filepath);
       System.err.println("\rDurationMismatch: "+formatTimeX(vi.duration)+" -> "+formatTimeX(nvi.duration));
       String err=ERR_DurationMismatch;
       markFileWithErrorAndDeleteTmpWithLogRewind(vi,err,tmp);
       return false;
     }else if(nvi.filesize-vi.filesize>1048576){
-      writeLog("FileSizeGrow: "+vi.filepath+", "+formatSizeX(vi.filesize)+" -> "+formatSizeX(nvi.filesize));
-      System.err.println("\rFileSizeGrow: "+formatSizeX(vi.filesize)+" -> "+formatSizeX(nvi.filesize));
+      writeLog("FileSizeGrow: "+formatSizeX(vi.filesize)+" -> "+formatSizeX(nvi.filesize)+"  "+vi.filepath);
+      System.err.println("\rFileSizeGrow: "+formatSizeX(vi.filesize)+" -> "+formatSizeX(nvi.filesize)+"  "+vi.filepath);
       String err=ERR_TFileGrowTooMuch;
       markFileWithErrorAndDeleteTmpWithLogRewind(vi,err,tmp);
       return false;
@@ -390,7 +391,7 @@ public class VideoTranscoder{
       }deleteFile(vi.filepath);
     }else replaceFile(nvi.filepath,vi.filepath);
     String output=String.format("\r%s -> %s %s",formatSizeX(vi.filesize),formatSizeX(nvi.filesize),newFilePathPre+transcodedPostfix);
-    writeLog("OK: "+vi.filepath+", "+formatSizeX(vi.filesize)+" -> "+formatSizeX(nvi.filesize));
+    writeLog("OK: "+formatSizeX(vi.filesize)+" -> "+formatSizeX(nvi.filesize)+"  "+vi.filepath);
     System.out.println(output);
     return true;
   }
