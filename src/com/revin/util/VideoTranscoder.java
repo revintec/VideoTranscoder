@@ -251,7 +251,7 @@ public class VideoTranscoder{
   protected static final Pattern ptStat=Pattern.compile("fps=\\s*(\\d+).*time=([\\d:\\.]+)");
   protected static final Pattern ptTime=Pattern.compile("(\\d+):(\\d+):(\\d+)\\.(\\d+)");
   public static final String vcodec="libx264",acodec="libfdk_aac";
-  public static final String[]ffmpeg="ffmpeg -i PATH_IN -n -f mp4 -vcodec VCODEC -s SCALE -acodec ACODEC -profile:a aac_he_v2 PATH_OUT".split("\\s+");
+  public static final String[]ffmpeg="ffmpeg -i PATH_IN -n -f mp4 -movflags faststart -vcodec VCODEC -s SCALE -acodec ACODEC -profile:a aac_he_v2 PATH_OUT".split("\\s+");
   public static final int ffmpegVcodec=index(ffmpeg,"VCODEC"),ffmpegAcodec=index(ffmpeg,"ACODEC");
   public static final int ffmpegIN=index(ffmpeg,"PATH_IN"),ffmpegSCALE=index(ffmpeg,"SCALE"),ffmpegOUT=index(ffmpeg,"PATH_OUT");
   public static final String transcodedPostfix=".mp4";
