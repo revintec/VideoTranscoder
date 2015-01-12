@@ -64,6 +64,7 @@ public class VideoTranscoder{
     public final String filepath;
     // used to determine is transcode necessary
     public final boolean format;
+    public final boolean faststart;
     // see ffmpeg doc, https://www.ffmpeg.org/ffmpeg-all.html#toc-Stream-selection
     // By default, ffmpeg includes only one stream of each type (video, audio, subtitle)
     // present in the input files and adds them to each output file.
@@ -75,9 +76,10 @@ public class VideoTranscoder{
     public final int fps;          // used to display transcode speed
     public final int width,height; // used to calculate scale ONLY
     public final long filesize;    // used to print how many disk-space was saved
-    public VideoInfo(String filepath,boolean format,boolean otherAVStreams,boolean otherStreams,boolean vpro,boolean apro,int duration,int fps,int width,int height,long filesize){
+    public VideoInfo(String filepath,boolean format,boolean faststart,boolean otherAVStreams,boolean otherStreams,boolean vpro,boolean apro,int duration,int fps,int width,int height,long filesize){
       this.filepath=filepath;
       this.format=format;
+      this.faststart=faststart;
       this.otherAVStreams=otherAVStreams;
       this.otherStreams=otherStreams;
       this.vpro=vpro;
@@ -139,6 +141,60 @@ public class VideoTranscoder{
     }if(index==-1)
       throw new IllegalArgumentException("no occurrence");
     else return index;
+  }
+  public static class Atom{
+    public final long offset;
+    public final long size;
+    public final String type;
+    public Atom(long offset,long size,String type){
+      this.offset=offset;
+      this.size=size;
+      this.type=type;
+    }
+  }
+  public static Atom nextAtom(RandomAccessFile raf)throws IOException{
+    long seek=raf.getFilePointer();
+    if(seek==raf.length())return null;
+    long size=raf.readInt();
+    if(size==0)return null;
+    char[]cb=new char[4];
+    for(int i=0;i<cb.length;++i){
+      int v=raf.read();
+      if(v<=0)throw new EOFException("read()="+v);
+      cb[i]=(char)v;
+    }if(size==1)size=raf.readLong();
+    raf.seek(seek+size);
+    return new Atom(seek,size,new String(cb));
+  }
+  public static boolean isStreamingOn(String path){
+    try(RandomAccessFile raf=new RandomAccessFile(path,"r")){
+      Atom atom;
+      while((atom=nextAtom(raf))!=null){
+        if("mdat".equals(atom.type))return false;
+        if("moov".equals(atom.type))return true;
+      }return false;
+    }catch(IOException e){
+      e.printStackTrace();
+      return false;
+    }
+  }
+  public static boolean printAtoms(String path){
+    try(RandomAccessFile raf=new RandomAccessFile(path,"r")){
+      Atom atom,mdat=null,moov=null;System.out.println(path);
+      while((atom=nextAtom(raf))!=null){
+        switch(atom.type){
+          case"moov":moov=atom;break;
+          case"mdat":mdat=atom;break;
+        }System.out.printf("Atom %s: %8s%n",atom.type,VideoTranscoder.formatSizeX(atom.size));
+      }
+      if(moov!=null&&mdat!=null&&moov.offset<mdat.offset)
+        System.out.println("faststart true");
+      else System.out.println("faststart false");
+      return true;
+    }catch(IOException e){
+      e.printStackTrace();
+      return false;
+    }
   }
   protected static final Pattern ptFps=Pattern.compile("(\\d+)/(\\d+)");
   public static final String[]ffprobe="ffprobe -v quiet -of flat -show_streams -show_format -i PATH_IN".split("\\s+");
@@ -229,7 +285,10 @@ public class VideoTranscoder{
           default:otherStreams=true;
         }
       }if(vpro==0||apro==0)return null;
-      return new VideoInfo(path,format,otherAVStreams,otherStreams,vpro>0,apro>0,duration,fps,width,height,filesize);
+      boolean faststart;
+      if(format)faststart=isStreamingOn(path);
+      else faststart=false;
+      return new VideoInfo(path,format,faststart,otherAVStreams,otherStreams,vpro>0,apro>0,duration,fps,width,height,filesize);
     }catch(Exception e){
       e.printStackTrace();
       return null;
@@ -244,7 +303,7 @@ public class VideoTranscoder{
     if(vi.otherAVStreams||vi.otherStreams)return "OTHER_STREAMS_PRESENT";
     // vi.width, vi.height already processed
     // in getInfo(...), if(pixels>800*800)vpro=-1;
-    if(vi.format&&vi.vpro&&vi.apro)
+    if(vi.format&&vi.faststart&&vi.vpro&&vi.apro)
       return "PROFILE_MATCH";
     return null; // means should convert
   }
@@ -262,7 +321,7 @@ public class VideoTranscoder{
   }
   /** timestamp in seconds */
   public static long timeStamp(){return System.nanoTime()/1000000000;}
-  public static String formatProfile(VideoInfo vi){return String.format("F%d X%d V%d A%d O%d",vi.format?1:0,vi.otherAVStreams?1:0,vi.vpro?1:0,vi.apro?1:0,vi.otherStreams?1:0);}
+  public static String formatProfile(VideoInfo vi){return String.format("F%d M%d X%d V%d A%d O%d",vi.format?1:0,vi.faststart?1:0,vi.otherAVStreams?1:0,vi.vpro?1:0,vi.apro?1:0,vi.otherStreams?1:0);}
   @Nullable
   public static String transcodeWithSoutPrints(VideoInfo vi){
     String tmp=vi.filepath+tmpFileAppendix;

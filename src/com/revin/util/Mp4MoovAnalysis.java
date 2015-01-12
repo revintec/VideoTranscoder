@@ -1,8 +1,5 @@
 package com.revin.util;
 
-import java.io.EOFException;
-import java.io.IOException;
-import java.io.RandomAccessFile;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
@@ -75,37 +72,5 @@ public class Mp4MoovAnalysis{
                 }else sb.append(o);
             }else sb.append(o);
         }else sb.append("null");
-    }
-    public static class Atom{
-        public final long size;
-        public final String type;
-        public Atom(long size,String type){
-            this.size=size;
-            this.type=type;
-        }
-    }
-    public static Atom nextAtom(RandomAccessFile raf)throws IOException{
-        int size=raf.readInt();
-        if(size==0)return null;
-        if(size<4)throw new RuntimeException("checked: size="+size);
-        char[]cb=new char[4];
-        for(int i=0;i<cb.length;++i){
-            int v=raf.read();
-            if(v<=0)throw new EOFException("read()="+v);
-            cb[i]=(char)v;
-        }
-        // FIXME some error here
-        int skip=size-4,skx=raf.skipBytes(skip);
-        if(skx!=skip)
-            throw new EOFException("skip("+skip+")="+skx);
-        return new Atom(size,new String(cb));
-    }
-    public static void main(String[]args)throws IOException{
-        String file="/Users/revin/Desktop/SOE-768/[PRESTIGE] ABS-223 水咲ローラ、満足度満点新人ソープ - Rola Misaki 水咲ローラ (Rola Takizawa 滝澤ローラ) 20歲 T172cmB83W58H84 (2013.05.01).mp4";
-        RandomAccessFile raf=new RandomAccessFile(file,"r");
-        Atom atom;
-        while((atom=nextAtom(raf))!=null){
-            System.out.println(deepToString(atom));
-        }
     }
 }
