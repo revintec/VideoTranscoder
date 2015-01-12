@@ -389,7 +389,7 @@ public class VideoTranscoder{
       return false;
     }else if(nvi.filesize-vi.filesize>1048576){
       writeLog("FileSizeGrow: "+formatSizeX(vi.filesize)+" -> "+formatSizeX(nvi.filesize)+"  "+vi.filepath);
-      System.err.println("\rFileSizeGrow: "+formatSizeX(vi.filesize)+" -> "+formatSizeX(nvi.filesize)+"  "+vi.filepath);
+      System.err.println("\rFileSizeGrow: "+formatSizeX(vi.filesize)+" -> "+formatSizeX(nvi.filesize));
       String err=ERR_TFileGrowTooMuch;
       markFileWithErrorAndDeleteTmpWithLogRewind(vi,err,tmp);
       return false;
