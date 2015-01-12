@@ -313,18 +313,16 @@ public class VideoTranscoder{
         process.destroyForcibly();
     }
   }
-  private static boolean replaceFile(String src,String dst){
-    try{Files.move(Paths.get(src),Paths.get(dst),StandardCopyOption.REPLACE_EXISTING);return true;}
-    catch(IOException e){e.printStackTrace();return false;}
+  private static Exception replaceFile(String src,String dst){
+    try{Files.move(Paths.get(src),Paths.get(dst),StandardCopyOption.REPLACE_EXISTING);return null;}
+    catch(IOException e){return e;}
   }
-  private static boolean tryMoveFile(String src,String dst){
-    try{Files.move(Paths.get(src),Paths.get(dst));return true;}
-    catch(IOException e){return false;}
+  private static Exception tryMoveFile(String src,String dst){
+    try{Files.move(Paths.get(src),Paths.get(dst));return null;}
+    catch(IOException e){return e;}
   }
-  private static boolean deleteFile(String file){return deleteFile(Paths.get(file));}
-  private static boolean deleteFile(Path file){
-    try{
-      Files.delete(file);return true;}catch(IOException e){e.printStackTrace();return false;}}
+  private static Exception deleteFile(String file){return deleteFile(Paths.get(file));}
+  private static Exception deleteFile(Path file){try{Files.delete(file);return null;}catch(IOException e){return e;}}
   public static String getFilePathPre(String path){
     Path p=Paths.get(path);
     String filename=p.getFileName().toString();
@@ -346,16 +344,31 @@ public class VideoTranscoder{
     return ""+p.resolveSibling(filename.substring(0,i)+PRAGMA_DNTRSC+error+filename.substring(i));
   }
   public static boolean markFileWithErrorAndDeleteTmpWithLogRewind(VideoInfo vi,String error,String tmp){
-    if(!markFileWithError(vi,error)){
-      writeLog("UnableToMarkError: "+error+"  "+vi.filepath);
-      System.err.println("\rUnable to mark error: "+error);
+    //noinspection ThrowableResultOfMethodCallIgnored
+    Exception e=markFileWithError(vi,error);
+    if(e!=null){
+      String out="UnableToMarkError: "+error+"  "+vi.filepath;
+      writeLog(out);
+      System.err.print("\r");
+      e.printStackTrace();
+      System.err.println(out);
       return false;
-    }else deleteFile(tmp);
-    return true;
+    }
+    //noinspection ThrowableResultOfMethodCallIgnored
+    e=deleteFile(tmp);
+    if(e!=null){
+      String out="UnableToDeleteTmpFile: "+tmp;
+      writeLog(out);
+      System.err.print("\r");
+      e.printStackTrace();
+      System.err.println(out);
+      return false;
+    }return true;
   }
-  public static boolean markFileWithError(VideoInfo vi,String error){
+  public static Exception markFileWithError(VideoInfo vi,String error){
     String newPath=markFileWithError(vi.filepath,error);
-    return newPath!=null&&tryMoveFile(vi.filepath,newPath);
+    if(newPath==null)return new IllegalArgumentException("newPath==null, vi.filepath="+vi.filepath);
+    return tryMoveFile(vi.filepath,newPath);
   }
   public static boolean finishWithFileAndDbOps(VideoInfo vi,String tmp){
     VideoInfo nvi=getInfo(tmp);
@@ -383,13 +396,31 @@ public class VideoTranscoder{
     }
     String newFilePathPre=getFilePathPre(vi.filepath);
     if(!(newFilePathPre+transcodedPostfix).equalsIgnoreCase(vi.filepath)){
-      if(!tryMoveFile(nvi.filepath,newFilePathPre+transcodedPostfix)){
+      if(null!=tryMoveFile(nvi.filepath,newFilePathPre+transcodedPostfix)){
         int i=1;
-        while(!tryMoveFile(nvi.filepath,newFilePathPre+"("+i+")"+transcodedPostfix))
+        while(null!=tryMoveFile(nvi.filepath,newFilePathPre+"("+i+")"+transcodedPostfix))
           ++i;
         newFilePathPre+="("+i+")";
-      }deleteFile(vi.filepath);
-    }else replaceFile(nvi.filepath,vi.filepath);
+      }Exception e=deleteFile(vi.filepath);
+      if(e!=null){
+        String out="UnableToDeleteFile: "+vi.filepath;
+        writeLog(out);
+        System.err.print("\r");
+        e.printStackTrace();
+        System.err.println(out);
+        return false;
+      }
+    }else{
+      Exception e=replaceFile(nvi.filepath,vi.filepath);
+      if(e!=null){
+        String out="UnableToReplaceFile: "+vi.filepath;
+        writeLog(out);
+        System.err.print("\r");
+        e.printStackTrace();
+        System.err.println(out);
+        return false;
+      }
+    }
     String output=String.format("\r%s -> %s %s",formatSizeX(vi.filesize),formatSizeX(nvi.filesize),newFilePathPre+transcodedPostfix);
     writeLog("OK: "+formatSizeX(vi.filesize)+" -> "+formatSizeX(nvi.filesize)+"  "+vi.filepath);
     System.out.println(output);
@@ -420,7 +451,12 @@ public class VideoTranscoder{
         String msg="Deleting: "+path;
         writeLog(msg);
         System.out.println(msg);
-        deleteFile(p);
+        Exception e=deleteFile(p);
+        if(e!=null){
+          writeLog("UnableToDeleteFile: "+path);
+          System.err.print("\r");
+          e.printStackTrace();
+        }
       }return FileVisitResult.CONTINUE;
     }
     @Override public FileVisitResult visitFileFailed(Path p,IOException e){return FileVisitResult.CONTINUE;}
