@@ -388,7 +388,9 @@ public class VideoTranscoder{
     int i=filename.lastIndexOf('.');
     if(i<=0||filename.length()-i>5) // .rmvb
       return path;
-    return p.resolveSibling(filename.substring(0,i)).toString();
+    // if path is "aaa .mp4", filename.substring() will be "aaa "
+    // p.resolveSibling("aaa ") will throw in Windows
+    return p.resolveSibling(filename.substring(0,i).trim()).toString();
   }
   /** no fs operation performed */
   public static String markFileWithError(String path,String error){
