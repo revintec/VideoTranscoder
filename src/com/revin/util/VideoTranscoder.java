@@ -543,6 +543,8 @@ public class VideoTranscoder{
     @Override public FileVisitResult preVisitDirectory(Path p,BasicFileAttributes a){return FileVisitResult.CONTINUE;}
     @Override public FileVisitResult visitFile(Path p,BasicFileAttributes a){
       if(a.size()<10485760)return FileVisitResult.CONTINUE; // less than 10M is likely not a video file
+      String filenamelower=p.getFileName().toString().toLowerCase();
+      if(filenamelower.endsWith(".zip")||filenamelower.endsWith(".rar"))return FileVisitResult.CONTINUE;
       String path=""+p;
       // .DO_NOT_TRSC. can also be in the path(not just the filename)
       // and it's case sensitive
