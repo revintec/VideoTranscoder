@@ -34,7 +34,7 @@ public class VideoTranscoder{
     if(!message.endsWith("\n"))message+="\n";
     message=message.replaceAll("(?<!\r)\n","\r\n");
     try{
-      fileout.write(message.getBytes());
+      fileout.write(message.getBytes("utf-8"));
       return true;
     }catch(IOException e){
       e.printStackTrace();
@@ -512,9 +512,6 @@ public class VideoTranscoder{
   public static void main(String[]args)throws IOException{
     if(args.length!=1){
       System.err.println("usage: videoTranscoder path/to/video/root/folder");
-      return;
-    }else if(!"utf-8".equalsIgnoreCase(System.getProperty("file.encoding"))){
-      System.err.println("use -Dfile.encoding=utf-8 to set encoding");
       return;
     }
     writeLog("\n================================");
