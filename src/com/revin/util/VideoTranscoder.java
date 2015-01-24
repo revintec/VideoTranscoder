@@ -47,17 +47,33 @@ public class VideoTranscoder{
   public static final String ERR_TFileGrowTooMuch="E06"; // after transcoding, file size grow too much
   public static final String tmpFileAppendix=".transcoding";
 
-  public static class DiscardStream extends Thread{
+  public static class StreamReaderThread extends Thread{
     protected final InputStream ins;
-    public DiscardStream(InputStream ins){this.ins=ins;}
+    protected String output;
+    public StreamReaderThread(InputStream ins){this.ins=ins;}
     @Override
     public void run(){
-      try{
-        byte[]buffer=new byte[8000];
-        //noinspection StatementWithEmptyBody
-        while(ins.read(buffer)!=-1);
+      try(InputStream ins=this.ins){
+        int l,len=0;
+        byte[]buffer=new byte[10485760]; // receive max of 10MB
+        while((l=ins.read(buffer,len,buffer.length-len))>0)len+=l;
+        synchronized(this){
+          output=new String(buffer,0,len);
+          this.notifyAll();
+        }if(l==0)throw new BufferOverflowException();
       }catch(IOException e){e.printStackTrace();}
-      finally{try{ins.close();}catch(IOException e){e.printStackTrace();}}
+    }
+    public String getOutput(){
+      return output;
+    }
+    public String waitOutput()throws InterruptedException{
+      if(output!=null)return output;
+      synchronized(this){
+        while(true){
+          if(output!=null)return output;
+          this.wait();
+        }
+      }
     }
   }
   public static class VideoInfo{
@@ -208,21 +224,30 @@ public class VideoTranscoder{
       long filesize=Files.size(p);
       ffprobe[ffprobeIN]=path;
       process=runtime.exec(ffprobe);
-      byte[]buffer=new byte[1048576];int len=0;
+      byte[]buffer=new byte[1048576];int l,len=0;
       InputStream ins=process.getInputStream();
-      new DiscardStream(process.getErrorStream()).start();
-      while(true){
-        int l=ins.read(buffer,len,buffer.length-len);
-        if(l==0)throw new BufferOverflowException();
-        else if(l==-1)break;
-        else len+=l;
+      StreamReaderThread ds=new StreamReaderThread(process.getErrorStream());
+      ds.start();
+      while((l=ins.read(buffer,len,buffer.length-len))>0)len+=l;
+      if(l==0){
+        System.err.println("STDOUT");
+        System.err.println(new String(buffer,0,len));
+        process.destroyForcibly();
+        process.waitFor(3000,TimeUnit.MILLISECONDS);
+        process=null;
+        System.err.println("STDERR");
+        System.err.println(ds.waitOutput());
+        throw new BufferOverflowException();
       }process.waitFor(3000,TimeUnit.MILLISECONDS);
       int exitCode;
       if((exitCode=process.exitValue())!=0){
-        if(len>0)System.err.println(new String(buffer,0,len));
+        if(len>0) System.err.println(new String(buffer,0,len));
+        System.err.println("STDOUT");
+        System.err.println(new String(buffer,0,len));
+        System.err.println("STDERR");
+        System.err.println(ds.waitOutput());
         throw new UnexpectedException("exit code: "+exitCode);
-      }
-      String[]output=new String(buffer,0,len).split("\r?\n");
+      }String[]output=new String(buffer,0,len).split("\r?\n");
       //noinspection ConstantConditions
       boolean format=getProperty(output,"format.format_name").matches(".*\\bmp4\\b.*");
       //noinspection ConstantConditions
@@ -261,19 +286,14 @@ public class VideoTranscoder{
               // present in the input files and adds them to each output file.
               otherAVStreams=true;
               vpro=-1;
-            }
-            //noinspection ConstantConditions
-            Matcher m=ptFps.matcher(getProperty(output,i,"avg_frame_rate"));
+            }Matcher m=ptFps.matcher(getProperty(output,i,"avg_frame_rate"));
             if(m.find()){
               int k=Integer.parseInt(m.group(1)),v=Integer.parseInt(m.group(2));
               if(!m.find()){
                 int fpx=(int)Math.ceil((double)k/v);
                 if(fpx>fps)fps=fpx;
               }
-            }
-            //noinspection ConstantConditions
-            int w=Integer.parseInt(getProperty(output,i,"width"));
-            //noinspection ConstantConditions
+            }int w=Integer.parseInt(getProperty(output,i,"width"));
             int h=Integer.parseInt(getProperty(output,i,"height"));
             int pixels=w*h;
             if(pixels>width*height){
@@ -285,9 +305,7 @@ public class VideoTranscoder{
           default:otherStreams=true;
         }
       }if(vpro==0||apro==0)return null;
-      boolean faststart;
-      if(format)faststart=isStreamingOn(path);
-      else faststart=false;
+      boolean faststart=format&&isStreamingOn(path);
       return new VideoInfo(path,format,faststart,otherAVStreams,otherStreams,vpro>0,apro>0,duration,fps,width,height,filesize);
     }catch(Exception e){
       e.printStackTrace();
@@ -335,7 +353,8 @@ public class VideoTranscoder{
       ffmpeg[ffmpegSCALE]=width+"x"+height;
       ffmpeg[ffmpegOUT]=tmp;
       process=runtime.exec(ffmpeg);
-      new DiscardStream(process.getInputStream()).start();
+      StreamReaderThread ds=new StreamReaderThread(process.getInputStream());
+      ds.start();
       BufferedReader br=new BufferedReader(new InputStreamReader(process.getErrorStream()));
       String line,clear="\r                                                                \r";
       String wholeBuffer="";
@@ -347,7 +366,7 @@ public class VideoTranscoder{
         int fps=Integer.parseInt(mt.group(1));
         String time=mt.group(2);
         Matcher ma=ptTime.matcher(time);
-        if(!ma.matches())throw new IllegalArgumentException(time);
+        if(!ma.matches())continue;
         int timecode=Integer.parseInt(ma.group(1))*3600+Integer.parseInt(ma.group(2))*60+Integer.parseInt(ma.group(3));
         double percent=(double)timecode*100/vi.duration;
         int eta=(int)(timeStamp()-startTime);
@@ -357,6 +376,9 @@ public class VideoTranscoder{
       }process.waitFor(3000,TimeUnit.MILLISECONDS);
       int exitCode;
       if((exitCode=process.exitValue())!=0){
+        System.err.println("STDOUT");
+        System.err.println(ds.waitOutput());
+        System.err.println("STDERR");
         System.err.println(wholeBuffer);
         throw new UnexpectedException("exit code: "+exitCode);
       }return tmp;
