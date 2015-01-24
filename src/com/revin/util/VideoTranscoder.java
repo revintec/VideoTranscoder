@@ -248,11 +248,8 @@ public class VideoTranscoder{
         System.err.println(ds.waitOutput());
         throw new UnexpectedException("exit code: "+exitCode);
       }String[]output=new String(buffer,0,len).split("\r?\n");
-      //noinspection ConstantConditions
       boolean format=getProperty(output,"format.format_name").matches(".*\\bmp4\\b.*");
-      //noinspection ConstantConditions
       int duration=(int)Double.parseDouble(getProperty(output,"format.duration"));
-      //noinspection ConstantConditions
       int streams=Integer.parseInt(getProperty(output,"format.nb_streams"));
       boolean otherAVStreams=false,otherStreams=false;
       int vpro=0,apro=0;
