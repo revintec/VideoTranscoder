@@ -241,7 +241,7 @@ public class VideoTranscoder{
       }process.waitFor(3000,TimeUnit.MILLISECONDS);
       int exitCode;
       if((exitCode=process.exitValue())!=0){
-        if(len>0) System.err.println(new String(buffer,0,len));
+        if(len>0)System.err.println(new String(buffer,0,len));
         System.err.println("STDOUT");
         System.err.println(new String(buffer,0,len));
         System.err.println("STDERR");
@@ -368,6 +368,7 @@ public class VideoTranscoder{
         double percent=(double)timecode*100/vi.duration;
         int eta=(int)(timeStamp()-startTime);
         eta=(int)(eta*(100-percent)/percent);
+        if(eta<0)eta=0;
         String out=String.format("\r%s\r%2d%%, FPS=%d%s, time=%s, ETA=%s",clear,(int)percent,fps,speedFactor(vi,fps),time,formatTimeX(eta));
         System.out.print(out);
       }process.waitFor(3000,TimeUnit.MILLISECONDS);
